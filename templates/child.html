@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Halaman Anak</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <h1>Halaman Anak</h1>
+    <p>Salin kode di bawah ini ke orang tua:</p>
+    <p id="peerId">Menunggu kode...</p>
+    <p><button id="cameraButton" disabled onclick="startCamera()">Aktifkan Kamera</button></p>
+    <p id="videoError"></p>
+    <p><button onclick="getLocation()">Kirim Lokasi</button></p>
+    <p id="demo"></p>
+
+    <script>
+        let peer = null;
+        const peerIdElement = document.getElementById("peerId");
+        const videoErrorElement = document.getElementById("videoError");
+        const demoElement = document.getElementById("demo");
+        const cameraButton = document.getElementById("cameraButton");
+
+        // Ambil kode dari backend dan inisialisasi PeerJS
+        async function initPeer() {
+            try {
+                const response = await fetch('/generate_code');
+                const data = await response.json();
+                if (!data.code) throw new Error("Kode tidak diterima dari server");
+                const code = data.code;
+
+                if (peerIdElement) {
+                    peerIdElement.innerHTML = `Kode Anda: ${code} (Salin ke orang tua)`;
+                } else {
+                    console.error("Elemen peerId tidak ditemukan");
+                }
+
+                // Inisialisasi PeerJS
+                peer = new Peer(code, {
+                    host: 'peerjs.fermyon.app',
+                    port: 443,
+                    path: '/',
+                    debug: 3
+                });
+
+                peer.on('open', (id) => {
+                    console.log('Child Code:', id);
+                    if (peerIdElement) {
+                        peerIdElement.innerHTML = `Kode Anda: ${id} (Salin ke orang tua, terhubung)`;
+                    }
+                    if (cameraButton) {
+                        cameraButton.disabled = false; // Aktifkan tombol setelah peer terhubung
+                    }
+                });
+
+                peer.on('error', (err) => {
+                    console.error('Peer Error:', err.type, err);
+                    if (videoErrorElement) {
+                        videoErrorElement.innerHTML = `Gagal koneksi: ${err.type}`;
+                    }
+                    if (cameraButton) {
+                        cameraButton.disabled = true; // Nonaktifkan tombol jika terjadi error
+                    }
+                });
+
+                // Timeout jika peer tidak terhubung dalam 10 detik
+                setTimeout(() => {
+                    if (!peer || peer.disconnected || peer.destroyed) {
+                        videoErrorElement.innerHTML = "Gagal terhubung ke server PeerJS. Coba refresh halaman.";
+                        cameraButton.disabled = true;
+                    }
+                }, 10000);
+            } catch (err) {
+                console.error('Error fetching code or initializing peer:', err);
+                if (peerIdElement) {
+                    peerIdElement.innerHTML = `Gagal mendapatkan kode: ${err.message}`;
+                }
+                if (cameraButton) {
+                    cameraButton.disabled = true;
+                }
+            }
+        }
+
+        // Panggil initPeer saat halaman dimuat
+        initPeer();
+
+        // Akses kamera tanpa menampilkan video
+        async function startCamera() {
+            if (!videoErrorElement) {
+                console.error("Elemen videoError tidak ditemukan");
+                return;
+            }
+            if (!peer || peer.disconnected || peer.destroyed) {
+                videoErrorElement.innerHTML = "PeerJS belum terhubung. Tunggu sebentar atau coba lagi.";
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const parentId = peer.id + '-parent';
+                const call = peer.call(parentId, stream);
+                if (!call) {
+                    videoErrorElement.innerHTML = "Gagal memulai panggilan: Peer tujuan tidak ditemukan.";
+                    return;
+                }
+                call.on('error', (err) => {
+                    console.error('WebRTC Error:', err);
+                    videoErrorElement.innerHTML = `Gagal streaming: ${err.type}`;
+                });
+                call.on('close', () => {
+                    console.log('Panggilan ditutup');
+                    videoErrorElement.innerHTML = "Panggilan kamera ditutup.";
+                });
+                videoErrorElement.innerHTML = "Kamera aktif dan streaming.";
+            } catch (err) {
+                console.error('Camera Error:', err);
+                videoErrorElement.innerHTML = `Gagal mengakses kamera: ${err.message}`;
+            }
+        }
+
+        // Kirim lokasi
+        function getLocation() {
+            if (!demoElement) {
+                console.error("Elemen demo tidak ditemukan");
+                return;
+            }
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(sendPosition, showError);
+            } else {
+                demoElement.innerHTML = "Geolocation tidak didukung.";
+            }
+        }
+
+        function sendPosition(position) {
+            demoElement.innerHTML = `Latitude: ${position.coords.latitude}<br>Longitude: ${position.coords.longitude}`;
+            fetch('/update_location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                })
+            })
+            .then(response => response.json())
+            .then(data => console.log('Location sent:', data))
+            .catch(error => {
+                console.error('Location Error:', error);
+                demoElement.innerHTML = "Gagal mengirim lokasi.";
+            });
+        }
+
+        function showError(error) {
+            let message;
+            switch(error.code) {
+                case error.PERMISSION_DENIED: message = "Lokasi ditolak."; break;
+                case error.POSITION_UNAVAILABLE: message = "Lokasi tidak tersedia."; break;
+                case error.TIMEOUT: message = "Waktu habis."; break;
+                default: message = "Error tidak diketahui."; break;
+            }
+            demoElement.innerHTML = message;
+        }
+    </script>
+</body>
+</html>

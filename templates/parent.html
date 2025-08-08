@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Halaman Orang Tua</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        #map { height: 400px; width: 100%; margin-top: 20px; }
+        #remoteVideo { width: 100%; max-width: 500px; margin-top: 20px; }
+    </style>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let peer;
+
+        function connectToChild() {
+            const childCode = document.getElementById("childCode").value;
+            if (!childCode || childCode.length !== 6) {
+                document.getElementById("demo").innerHTML = "Masukkan kode anak 6 angka.";
+                return;
+            }
+            peer = new Peer(childCode + '-parent', {
+                host: 'peerjs.fermyon.app',
+                port: 443,
+                path: '/',
+                debug: 3
+            });
+
+            peer.on('open', (id) => {
+                console.log('Parent Peer ID:', id);
+                document.getElementById("demo").innerHTML = "Terhubung sebagai: " + id;
+            });
+
+            peer.on('call', (call) => {
+                call.answer();
+                call.on('stream', (remoteStream) => {
+                    console.log('Menerima stream dari anak');
+                    const video = document.getElementById('remoteVideo');
+                    video.srcObject = remoteStream;
+                    video.play();
+                });
+                call.on('error', (err) => {
+                    console.error('WebRTC Error:', err);
+                    document.getElementById("demo").innerHTML = "Gagal menerima video: " + err.type;
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer Error:', err);
+                document.getElementById("demo").innerHTML = "Gagal koneksi: " + err.type;
+            });
+        }
+
+        function getLocation() {
+            fetch('/get_location')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.latitude && data.longitude) {
+                        document.getElementById("demo").innerHTML =
+                            "Latitude: " + data.latitude +
+                            "<br>Longitude: " + data.longitude;
+                        const map = L.map('map').setView([data.latitude, data.longitude], 13);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                        }).addTo(map);
+                        L.marker([data.latitude, data.longitude]).addTo(map)
+                            .bindPopup('Lokasi Anak').openPopup();
+                    } else {
+                        document.getElementById("demo").innerHTML = "Belum ada data lokasi.";
+                    }
+                })
+                .catch(error => {
+                    console.error('Location Error:', error);
+                    document.getElementById("demo").innerHTML = "Gagal mendapatkan lokasi.";
+                });
+        }
+    </script>
+</head>
+<body>
+    <h1>Halaman Orang Tua</h1>
+    <p>Masukkan kode anak (6 angka):</p>
+    <input type="text" id="childCode" placeholder="Kode Anak">
+    <p><button onclick="connectToChild()">Hubungkan ke Anak</button></p>
+    <p><button onclick="getLocation()">Lihat Lokasi</button></p>
+    <p id="demo"></p>
+    <div id="map"></div>
+    <p>Video dari anak:</p>
+    <video id="remoteVideo" autoplay></video>
+</body>
+</html>
